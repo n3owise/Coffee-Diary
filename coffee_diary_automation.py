@@ -255,6 +255,15 @@ def split_keywords(value: str) -> list[str]:
     return keywords
 
 
+def normalized_search_text(text: str) -> str:
+    return re.sub(r"\s+", " ", clean_cell(text).lower().replace("-", " ").replace("_", " "))
+
+
+def contains_excluded_keyword(text: str, keywords: list[str]) -> bool:
+    haystack = normalized_search_text(text)
+    return any(keyword and normalized_search_text(keyword) in haystack for keyword in keywords)
+
+
 def get_nested_values(data: Any) -> list[Any]:
     if isinstance(data, list):
         out: list[Any] = []
@@ -519,8 +528,8 @@ class CoffeeScraper:
         return list(deduped.values())
 
     def should_exclude(self, product: Product, keywords: list[str]) -> bool:
-        haystack = " ".join([product.name, product.product_link, product.raw_search_text]).lower()
-        return any(keyword and keyword in haystack for keyword in keywords)
+        haystack = " ".join([product.name, product.product_link, product.raw_search_text])
+        return contains_excluded_keyword(haystack, keywords)
 
     def scrape_shopify(self, entry: RosterEntry) -> list[Product]:
         response = self.fetch(entry.source_url)
@@ -565,7 +574,13 @@ class CoffeeScraper:
     def scrape_product_pages(self, entry: RosterEntry) -> list[Product]:
         links = self.discover_product_links(entry.source_url)
         products: list[Product] = []
-        for link in links[:MAX_PRODUCTS_PER_ROASTER]:
+        scanned_links = 0
+        for link in links:
+            if contains_excluded_keyword(link, entry.exclude_keywords):
+                continue
+            if scanned_links >= MAX_PRODUCTS_PER_ROASTER:
+                break
+            scanned_links += 1
             try:
                 products.append(self.parse_product_page(entry, link))
             except Exception as exc:
