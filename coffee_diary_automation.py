@@ -819,50 +819,6 @@ def roster_status_updates(row_number: int, status_text: str) -> list[dict[str, A
     ]
 
 
-def send_telegram_message(text: str) -> bool:
-    if requests is None:
-        print("Missing Python dependencies; skipping Telegram notification.", file=sys.stderr)
-        return False
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat_id:
-        print("Telegram secrets are incomplete; skipping notification.", file=sys.stderr)
-        return False
-
-    response = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={
-            "chat_id": chat_id,
-            "text": text[:4000],
-            "disable_web_page_preview": True,
-        },
-        timeout=HTTP_TIMEOUT,
-    )
-    if not response.ok:
-        print(f"Telegram notification failed: {response.status_code} {response.text[:300]}", file=sys.stderr)
-        return False
-    return True
-
-
-def notification_body(run: str, stats: dict[str, int], status: str, errors: list[list[str]]) -> str:
-    lines = [
-        f"Coffee Diary daily run: {run}",
-        f"Status: {status}",
-        "",
-        f"Roasters checked: {stats['roasters_checked']}",
-        f"Products scanned: {stats['products_scanned']}",
-        f"New products added: {stats['new_products']}",
-        f"Products updated: {stats['updated_products']}",
-        f"Errors: {stats['errors']}",
-    ]
-    if errors:
-        lines.append("")
-        lines.append("Errors:")
-        for row in errors[:10]:
-            lines.append(f"- {row[2]}: {row[4]} - {row[5]}")
-    return "\n".join(lines)
-
-
 def run_automation(dry_run: bool = False) -> int:
     spreadsheet_id = os.environ.get("GOOGLE_SHEET_ID", SHEET_ID_DEFAULT).strip()
     run = run_id()
@@ -879,7 +835,7 @@ def run_automation(dry_run: bool = False) -> int:
     new_rows, cell_updates, change_rows, error_rows, roster_updates, stats = prepare_changes(run, master_values, rosters, scraper)
     status = "OK" if stats["errors"] == 0 else "Completed with errors"
 
-    notification_sent = False if dry_run else send_telegram_message(notification_body(run, stats, status, error_rows))
+    notification_sent = False
     finished = timestamp()
     run_log_row = [
         timestamp(),
@@ -893,7 +849,7 @@ def run_automation(dry_run: bool = False) -> int:
         str(stats["updated_products"]),
         str(stats["errors"]),
         "TRUE" if notification_sent else "FALSE",
-        "Dry run; no sheets written" if dry_run else "",
+        "Dry run; no sheets written; notifications disabled" if dry_run else "Notifications disabled",
     ]
 
     if dry_run:
@@ -911,14 +867,10 @@ def run_automation(dry_run: bool = False) -> int:
 
 
 def check_config() -> int:
-    optional_telegram = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
     has_google_credentials = bool(os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
-    missing_telegram = [name for name in optional_telegram if not os.environ.get(name)]
     if not has_google_credentials:
         print("Missing GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
         return 1
-    if missing_telegram:
-        print("Telegram will be skipped unless these variables are set: " + ", ".join(missing_telegram), file=sys.stderr)
     print("Configuration check completed.")
     return 0
 
