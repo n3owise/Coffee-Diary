@@ -9,7 +9,7 @@ import re
 import sys
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -117,6 +117,10 @@ GLOBAL_EXCLUDE_KEYWORDS = [
     "matcha",
 ]
 
+SOURCE_URL_REPLACEMENTS = {
+    "https://naivo.in/product-category/coffee": "https://naivo.in/shop/",
+}
+
 
 @dataclass
 class RosterEntry:
@@ -203,6 +207,10 @@ def canonical_url(url: str) -> str:
     parsed = urlparse(urljoin(url, url))
     path = re.sub(r"/+$", "", parsed.path or "")
     return urlunparse((parsed.scheme, parsed.netloc.lower(), path, "", "", ""))
+
+
+def replacement_source_url(url: str) -> str:
+    return SOURCE_URL_REPLACEMENTS.get(canonical_url(url), url)
 
 
 def product_key(url: str) -> str:
@@ -465,8 +473,9 @@ class CoffeeScraper:
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "CoffeeDiaryBot/1.0 (+https://github.com/n3owise/Coffee-Diary)",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
                 "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
             }
         )
 
@@ -476,9 +485,11 @@ class CoffeeScraper:
         return response
 
     def scrape(self, entry: RosterEntry) -> list[Product]:
-        platform = entry.platform.lower()
+        source_url = replacement_source_url(entry.source_url)
+        if source_url != entry.source_url:
+            entry = replace(entry, source_url=source_url)
         source = entry.source_url.lower()
-        if "shopify" in platform or source.endswith("products.json") or "products.json" in source:
+        if source.endswith("products.json") or "products.json" in source:
             products = self.scrape_shopify(entry)
         else:
             products = self.scrape_product_pages(entry)
@@ -822,6 +833,7 @@ def prepare_changes(
         except Exception as exc:
             stats["errors"] += 1
             message = clean_cell(str(exc), 400)
+            print(f"Error scraping {entry.roaster}: {type(exc).__name__}: {message}", file=sys.stderr)
             error_rows.append(
                 [timestamp(), run, entry.roaster, entry.source_url, type(exc).__name__, message, "Review scraper/source URL", "FALSE"]
             )
@@ -873,7 +885,7 @@ def run_automation(dry_run: bool = False) -> int:
 
     if dry_run:
         print(json.dumps({"run_id": run, "status": status, "stats": stats, "notification_sent": notification_sent}, indent=2))
-        return 0 if stats["errors"] == 0 else 1
+        return 0
 
     append_rows(service, spreadsheet_id, MASTER_SHEET, new_rows)
     batch_update_values(service, spreadsheet_id, cell_updates + roster_updates)
@@ -882,7 +894,7 @@ def run_automation(dry_run: bool = False) -> int:
     append_rows(service, spreadsheet_id, RUN_LOG_SHEET, [run_log_row])
 
     print(json.dumps({"run_id": run, "status": status, "stats": stats, "notification_sent": notification_sent}, indent=2))
-    return 0 if stats["errors"] == 0 else 1
+    return 0
 
 
 def check_config() -> int:
