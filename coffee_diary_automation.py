@@ -95,6 +95,7 @@ ERROR_COLUMNS = [
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30), "IST")
 HTTP_TIMEOUT = 30
 GOOGLE_API_MAX_ATTEMPTS = 5
+GOOGLE_WRITE_CHUNK_SIZE = 100
 MAX_PRODUCTS_PER_ROASTER = 250
 
 GLOBAL_EXCLUDE_KEYWORDS = [
@@ -711,10 +712,12 @@ def execute_google_request(request: Any, action: str) -> dict[str, Any]:
             return request.execute()
         except Exception as exc:
             status = getattr(getattr(exc, "resp", None), "status", None)
-            if status not in {429, 500, 502, 503, 504} or attempt == GOOGLE_API_MAX_ATTEMPTS:
+            retryable = status is None or status in {429, 500, 502, 503, 504}
+            if not retryable or attempt == GOOGLE_API_MAX_ATTEMPTS:
                 raise
             delay = min(2 ** attempt, 30)
-            print(f"Google Sheets API {action} failed with HTTP {status}; retrying in {delay}s ({attempt}/{GOOGLE_API_MAX_ATTEMPTS})", file=sys.stderr)
+            label = f"HTTP {status}" if status is not None else type(exc).__name__
+            print(f"Google Sheets API {action} failed with {label}; retrying in {delay}s ({attempt}/{GOOGLE_API_MAX_ATTEMPTS})", file=sys.stderr)
             time.sleep(delay)
     raise RuntimeError(f"Google Sheets API {action} failed")
 
@@ -722,24 +725,28 @@ def execute_google_request(request: Any, action: str) -> dict[str, Any]:
 def append_rows(service: Any, spreadsheet_id: str, sheet_name: str, rows: list[list[str]]) -> None:
     if not rows:
         return
-    request = service.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=sheet_range(sheet_name, "A1"),
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": rows},
-    )
-    execute_google_request(request, f"append {sheet_name}")
+    for start in range(0, len(rows), GOOGLE_WRITE_CHUNK_SIZE):
+        chunk = rows[start : start + GOOGLE_WRITE_CHUNK_SIZE]
+        request = service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=sheet_range(sheet_name, "A1"),
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": chunk},
+        )
+        execute_google_request(request, f"append {sheet_name}")
 
 
 def batch_update_values(service: Any, spreadsheet_id: str, updates: list[dict[str, Any]]) -> None:
     if not updates:
         return
-    request = service.spreadsheets().values().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={"valueInputOption": "RAW", "data": updates},
-    )
-    execute_google_request(request, "batch update values")
+    for start in range(0, len(updates), GOOGLE_WRITE_CHUNK_SIZE):
+        chunk = updates[start : start + GOOGLE_WRITE_CHUNK_SIZE]
+        request = service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": chunk},
+        )
+        execute_google_request(request, "batch update values")
 
 
 def validate_header(values: list[list[str]], expected: list[str], sheet_name: str) -> None:
