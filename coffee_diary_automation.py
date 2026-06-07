@@ -109,18 +109,24 @@ GLOBAL_EXCLUDE_KEYWORDS = [
     "sample pack",
     "tester",
     "drip bag",
+    "drip filter",
     "filter paper",
     "pourover pack",
     "pourtable pourover",
     "bulk",
     "wholesale",
     "matcha",
+    "gift box",
+    "coffee maker",
+    "coffee mug",
 ]
 
 SOURCE_URL_REPLACEMENTS = {
     "https://naivo.in/product-category/coffee": "https://naivo.in/shop/",
     "https://redsirocco.com/product-category/coffee": "https://redsirocco.com/product-sitemap.xml",
 }
+
+READER_FALLBACK_HOSTS = {"redsirocco.com"}
 
 
 @dataclass
@@ -212,6 +218,10 @@ def canonical_url(url: str) -> str:
 
 def replacement_source_url(url: str) -> str:
     return SOURCE_URL_REPLACEMENTS.get(canonical_url(url), url)
+
+
+def reader_fallback_url(url: str) -> str:
+    return "https://r.jina.ai/http://" + url
 
 
 def product_key(url: str) -> str:
@@ -482,6 +492,9 @@ class CoffeeScraper:
 
     def fetch(self, url: str) -> requests.Response:
         response = self.session.get(url, timeout=HTTP_TIMEOUT)
+        host = urlparse(url).netloc.lower()
+        if response.status_code in {403, 429} and host in READER_FALLBACK_HOSTS:
+            response = self.session.get(reader_fallback_url(url), timeout=HTTP_TIMEOUT)
         response.raise_for_status()
         return response
 
@@ -573,6 +586,11 @@ class CoffeeScraper:
             parsed = urlparse(absolute)
             if parsed.netloc.lower() == source_host and any(pattern in parsed.path for pattern in product_patterns):
                 links.append(absolute)
+        for match in re.findall(r"https?://[^\s\])<>\"']+", response.text):
+            absolute = canonical_url(match.rstrip(".,;"))
+            parsed = urlparse(absolute)
+            if parsed.netloc.lower() == source_host and any(pattern in parsed.path for pattern in product_patterns):
+                links.append(absolute)
         for anchor in soup.find_all("a", href=True):
             href = anchor.get("href") or ""
             absolute = canonical_url(urljoin(source_url, href))
@@ -609,6 +627,10 @@ class CoffeeScraper:
             title = clean_cell(og_title.get("content")) if og_title and og_title.get("content") else ""
         if not title and soup.title:
             title = clean_cell(soup.title.get_text(" ").split("|")[0])
+        if not title:
+            title_match = re.search(r"^Title:\s*(.+)$", response.text, re.M) or re.search(r"^#\s+(.+)$", response.text, re.M)
+            if title_match:
+                title = clean_cell(title_match.group(1).split("|")[0].replace(" - Red Sirocco", ""))
 
         visible_text = self.visible_page_text(soup)
         descriptions = [visible_text]
