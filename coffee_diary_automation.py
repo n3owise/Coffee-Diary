@@ -119,6 +119,7 @@ GLOBAL_EXCLUDE_KEYWORDS = [
 
 SOURCE_URL_REPLACEMENTS = {
     "https://naivo.in/product-category/coffee": "https://naivo.in/shop/",
+    "https://redsirocco.com/product-category/coffee": "https://redsirocco.com/product-sitemap.xml",
 }
 
 
@@ -567,6 +568,11 @@ class CoffeeScraper:
             "/products/",
             "/product/",
         ]
+        for loc in soup.find_all("loc"):
+            absolute = canonical_url(clean_cell(loc.get_text()))
+            parsed = urlparse(absolute)
+            if parsed.netloc.lower() == source_host and any(pattern in parsed.path for pattern in product_patterns):
+                links.append(absolute)
         for anchor in soup.find_all("a", href=True):
             href = anchor.get("href") or ""
             absolute = canonical_url(urljoin(source_url, href))
