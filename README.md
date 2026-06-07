@@ -7,7 +7,7 @@ The workflow reads the `Roster Checklist` tab, scrapes enabled roaster source UR
 ## Google Sheet
 
 - Sheet ID: `1q7mjRmjI8ywrSXe1OU6oZ2jNOib0KHNoEK7i8rUH0vg`
-- Notification email: `iamspyderhack@gmail.com`
+- Notification channel: Telegram bot
 - Daily schedule: `09:00 IST`
 - GitHub Actions cron: `30 3 * * *`
 
@@ -29,17 +29,22 @@ Do not commit or paste the JSON key into the repository.
 Add these in GitHub under `Settings` > `Secrets and variables` > `Actions`.
 
 - `GOOGLE_SERVICE_ACCOUNT_JSON`: full service account JSON key.
-- `SMTP_HOST`: SMTP server for outgoing email, for example `smtp.gmail.com`.
-- `SMTP_PORT`: SMTP port, usually `465` for SSL.
-- `SMTP_USERNAME`: sender email login.
-- `SMTP_PASSWORD`: sender email password or app password.
-- `SMTP_FROM`: sender email address.
+- `TELEGRAM_BOT_TOKEN`: token from BotFather.
+- `TELEGRAM_CHAT_ID`: Telegram chat ID that should receive the daily message.
 
-If SMTP secrets are missing, the sheet update can still run, but daily email will be skipped.
+If Telegram secrets are missing, the sheet update can still run, but notification will be skipped.
 
-## Gmail SMTP Notes
+## Telegram Bot Setup
 
-If using Gmail as the sender, enable 2-step verification and create an App Password. Use that App Password as `SMTP_PASSWORD`.
+1. In Telegram, open `@BotFather`.
+2. Send `/newbot`.
+3. Give the bot a name, for example `Coffee Diary Bot`.
+4. Give the bot a username ending in `bot`, for example `coffee_diary_daily_bot`.
+5. Copy the token BotFather gives you.
+6. Add it to GitHub as `TELEGRAM_BOT_TOKEN`.
+7. Open your new bot in Telegram and send it any message, for example `start`.
+8. Get the chat ID from `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`.
+9. Add the chat ID to GitHub as `TELEGRAM_CHAT_ID`.
 
 ## Local Checks
 

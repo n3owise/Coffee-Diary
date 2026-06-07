@@ -6,12 +6,9 @@ import html
 import json
 import os
 import re
-import smtplib
-import ssl
 import sys
 import traceback
 from dataclasses import dataclass
-from email.message import EmailMessage
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -27,7 +24,6 @@ else:
 
 
 SHEET_ID_DEFAULT = "1q7mjRmjI8ywrSXe1OU6oZ2jNOib0KHNoEK7i8rUH0vg"
-NOTIFICATION_EMAIL_DEFAULT = "iamspyderhack@gmail.com"
 
 MASTER_SHEET = "Master Sheet"
 ROSTER_SHEET = "Roster Checklist"
@@ -823,37 +819,32 @@ def roster_status_updates(row_number: int, status_text: str) -> list[dict[str, A
     ]
 
 
-def send_email(subject: str, body: str) -> bool:
-    recipient = os.environ.get("NOTIFICATION_EMAIL", NOTIFICATION_EMAIL_DEFAULT).strip()
-    smtp_host = os.environ.get("SMTP_HOST", "").strip()
-    smtp_user = os.environ.get("SMTP_USERNAME", "").strip()
-    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
-    smtp_from = os.environ.get("SMTP_FROM", smtp_user).strip()
-    smtp_port = int(os.environ.get("SMTP_PORT", "465"))
-    if not all([recipient, smtp_host, smtp_user, smtp_password, smtp_from]):
-        print("SMTP secrets are incomplete; skipping email notification.", file=sys.stderr)
+def send_telegram_message(text: str) -> bool:
+    if requests is None:
+        print("Missing Python dependencies; skipping Telegram notification.", file=sys.stderr)
+        return False
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        print("Telegram secrets are incomplete; skipping notification.", file=sys.stderr)
         return False
 
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = smtp_from
-    message["To"] = recipient
-    message.set_content(body)
-
-    if smtp_port == 465:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context) as server:
-            server.login(smtp_user, smtp_password)
-            server.send_message(message)
-    else:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls(context=ssl.create_default_context())
-            server.login(smtp_user, smtp_password)
-            server.send_message(message)
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text[:4000],
+            "disable_web_page_preview": True,
+        },
+        timeout=HTTP_TIMEOUT,
+    )
+    if not response.ok:
+        print(f"Telegram notification failed: {response.status_code} {response.text[:300]}", file=sys.stderr)
+        return False
     return True
 
 
-def email_body(run: str, stats: dict[str, int], status: str, errors: list[list[str]]) -> str:
+def notification_body(run: str, stats: dict[str, int], status: str, errors: list[list[str]]) -> str:
     lines = [
         f"Coffee Diary daily run: {run}",
         f"Status: {status}",
@@ -888,8 +879,7 @@ def run_automation(dry_run: bool = False) -> int:
     new_rows, cell_updates, change_rows, error_rows, roster_updates, stats = prepare_changes(run, master_values, rosters, scraper)
     status = "OK" if stats["errors"] == 0 else "Completed with errors"
 
-    subject = f"Coffee Diary daily update: {stats['new_products']} new, {stats['updated_products']} updated"
-    notification_sent = False if dry_run else send_email(subject, email_body(run, stats, status, error_rows))
+    notification_sent = False if dry_run else send_telegram_message(notification_body(run, stats, status, error_rows))
     finished = timestamp()
     run_log_row = [
         timestamp(),
@@ -921,14 +911,14 @@ def run_automation(dry_run: bool = False) -> int:
 
 
 def check_config() -> int:
-    optional_email = ["SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM"]
+    optional_telegram = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
     has_google_credentials = bool(os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
-    missing_email = [name for name in optional_email if not os.environ.get(name)]
+    missing_telegram = [name for name in optional_telegram if not os.environ.get(name)]
     if not has_google_credentials:
         print("Missing GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
         return 1
-    if missing_email:
-        print("Email will be skipped unless these SMTP variables are set: " + ", ".join(missing_email), file=sys.stderr)
+    if missing_telegram:
+        print("Telegram will be skipped unless these variables are set: " + ", ".join(missing_telegram), file=sys.stderr)
     print("Configuration check completed.")
     return 0
 
