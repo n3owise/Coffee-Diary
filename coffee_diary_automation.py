@@ -105,21 +105,63 @@ GLOBAL_EXCLUDE_KEYWORDS = [
     "merch",
     "merchandise",
     "gift card",
+    "gift box",
     "subscription",
     "sampler",
     "sample pack",
+    "sample packet",
     "tester",
     "drip bag",
+    "drip coffee bag",
     "drip filter",
     "filter paper",
+    "strip & pour",
+    "strip pour",
     "pourover pack",
+    "pour over",
+    "pour-over",
+    "pourover",
     "pourtable pourover",
     "bulk",
     "wholesale",
     "matcha",
-    "gift box",
+    "cascara",
+    "brewin a cup",
+    "go brew",
     "coffee maker",
     "coffee mug",
+    "mug",
+    "tote",
+    "cap",
+    "shirt",
+    "hoodie",
+    "grinder",
+    "brewer",
+    "kettle",
+    "scale",
+]
+
+ROASTED_COFFEE_POSITIVE_KEYWORDS = [
+    "coffee",
+    "beans",
+    "whole bean",
+    "ground coffee",
+    "roast",
+    "espresso",
+    "filter roast",
+    "omni roast",
+    "blend",
+    "arabica",
+    "robusta",
+    "excelsa",
+    "estate",
+    "washed",
+    "natural",
+    "honey",
+    "anaerobic",
+    "decaf",
+    "monsoon",
+    "barrel aged",
 ]
 
 SOURCE_URL_REPLACEMENTS = {
@@ -262,6 +304,32 @@ def normalized_search_text(text: str) -> str:
 def contains_excluded_keyword(text: str, keywords: list[str]) -> bool:
     haystack = normalized_search_text(text)
     return any(keyword and normalized_search_text(keyword) in haystack for keyword in keywords)
+
+
+def has_positive_coffee_evidence(text: str) -> bool:
+    haystack = normalized_search_text(text)
+    return any(normalized_search_text(keyword) in haystack for keyword in ROASTED_COFFEE_POSITIVE_KEYWORDS)
+
+
+def is_roasted_coffee_product(product: Product, keywords: list[str]) -> bool:
+    text = " ".join(
+        [
+            product.name,
+            product.product_link,
+            product.raw_search_text,
+            product.roast_profile,
+            product.flavour_notes,
+            product.origin_location,
+            product.varietal_species,
+            product.process,
+            product.elevation,
+        ]
+    )
+    if contains_excluded_keyword(text, keywords):
+        return False
+    if product.roast_profile or product.varietal_species or product.process or product.elevation:
+        return True
+    return has_positive_coffee_evidence(text)
 
 
 def get_nested_values(data: Any) -> list[Any]:
@@ -522,14 +590,13 @@ class CoffeeScraper:
         for product in products:
             if not product.name or not product.product_link:
                 continue
-            if self.should_exclude(product, entry.exclude_keywords):
+            if not self.should_keep_product(product, entry.exclude_keywords):
                 continue
             deduped.setdefault(product_key(product.product_link), product)
         return list(deduped.values())
 
-    def should_exclude(self, product: Product, keywords: list[str]) -> bool:
-        haystack = " ".join([product.name, product.product_link, product.raw_search_text])
-        return contains_excluded_keyword(haystack, keywords)
+    def should_keep_product(self, product: Product, keywords: list[str]) -> bool:
+        return is_roasted_coffee_product(product, keywords)
 
     def scrape_shopify(self, entry: RosterEntry) -> list[Product]:
         response = self.fetch(entry.source_url)
